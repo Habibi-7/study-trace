@@ -1,0 +1,24 @@
+{
+  "name": "@study-trace/mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "study-trace-mcp": "dist/index.js"
+  },
+  "scripts": {
+    "build": "esbuild src/index.ts --bundle --platform=node --format=esm --target=node20 --outfile=dist/index.js --banner:js=\"#!/usr/bin/env node\"",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.1",
+    "@study-trace/core": "workspace:*",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "esbuild": "0.28.2",
+    "vitest": "^4.1.10"
+  }
+}

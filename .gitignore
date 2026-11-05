@@ -1,0 +1,6 @@
+node_modules/
+dist/
+dist-sim/
+coverage/
+.DS_Store
+.env

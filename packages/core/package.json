@@ -1,0 +1,17 @@
+{
+  "name": "@study-trace/core",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.10",
+    "@types/node": "^26.1.1"
+  }
+}

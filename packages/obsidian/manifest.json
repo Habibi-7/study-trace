@@ -1,0 +1,9 @@
+{
+  "id": "study-trace",
+  "name": "Study Trace",
+  "version": "0.1.0",
+  "minAppVersion": "1.5.0",
+  "description": "Quietly records how you study a note \u2014 where you write, stall, erase and rewrite \u2014 so any AI tutor can read it through the Study Trace MCP server. Local only.",
+  "author": "Study Trace",
+  "isDesktopOnly": true
+}
