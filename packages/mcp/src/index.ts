@@ -1,6 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { buildContextPack, formatClock, notesAt, sectionName, toMarkdown } from "@study-trace/core";
+import { formatClock, notesAt, sectionName, toMarkdown } from "@study-trace/core";
 import { z } from "zod";
 import { loadSittings, moment, pick, recap, type Sitting } from "./sittings";
 
@@ -74,29 +74,6 @@ server.registerTool(
     },
   },
   async ({ note, limit }) => text(recap(await loadSittings(dir), { note, limit })),
-);
-
-server.registerTool(
-  "get_context_pack",
-  {
-    title: "What a tutor would have noticed",
-    description:
-      "The learner's sitting as a tutor sitting beside them would summarize it: where they are, where it was hard (stalls, big erases, rewrites), the sections they worked in, recent edits, questions they marked. A sensor log — what happened, not what they know. Use it before helping someone with what they're studying.",
-    inputSchema: {
-      ...which,
-      at: z
-        .string()
-        .optional()
-        .describe('A moment: "m:ss" into the sitting, ISO time, or epoch ms. Default: the end.'),
-      format: z.enum(["markdown", "json"]).optional(),
-    },
-  },
-  async ({ session, note, at, format }) => {
-    const sitting = await find(session, note);
-    if (typeof sitting === "string") return text(sitting);
-    const pack = buildContextPack(sitting.view, { at: moment(sitting, at), topic: sitting.note });
-    return text(format === "json" ? JSON.stringify(pack.data, null, 2) : pack.text);
-  },
 );
 
 server.registerTool(

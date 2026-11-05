@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { buildContextPack } from "./pack";
 import { notesAt, readTrace, sectionName, sectionOf } from "./read";
 import { movedBlocks, Recorder, STUCK_MS, textDelta } from "./recorder";
 import type { Block, LandmarkPayload, TraceEvent } from "./types";
@@ -8,20 +7,14 @@ function harness(blocks: Block[]) {
   let now = 1_000_000;
   let seq = 0;
   let visible = true;
-  const crops: string[] = [];
   const core = new Recorder({
     now: () => now,
     emit: () => seq++,
     isVisible: () => visible,
-    capture: async (id) => {
-      crops.push(id);
-      return { image: "data:image/jpeg;base64,AA", w: 10, h: 10 };
-    },
   });
-  core.start(blocks, { first: 0, last: blocks.length - 1 }, "Derivatives");
+  core.start(blocks, "Derivatives");
   return {
     core,
-    crops,
     advance: (ms: number) => {
       now += ms;
     },
@@ -41,7 +34,6 @@ function harness(blocks: Block[]) {
 
 const h = (id: string, text: string): Block => ({ id, type: "heading", text, level: 2 });
 const p = (id: string, text: string): Block => ({ id, type: "paragraph", text });
-const sketch = (id: string, marks: number): Block => ({ id, type: "sketch", text: "", marks });
 
 const LONG = "The derivative of x squared is 2x because the slope grows linearly";
 
@@ -108,19 +100,16 @@ describe("acts", () => {
 });
 
 describe("math", () => {
-  it("acts read the plain source the student typed, with LaTeX alongside", () => {
-    const m = (text: string, latex: string): Block => ({ id: "m", type: "math", text, latex });
-    const t = harness([h("h1", "Limits"), m("", "")]);
-    t.core.change([h("h1", "Limits"), m("sqrt(x^2+1)", "\\sqrt{x^{2} + 1}")]);
+  it("acts read the plain source the student typed", () => {
+    const m = (text: string): Block => ({ id: "m", type: "math", text });
+    const t = harness([h("h1", "Limits"), m("")]);
+    t.core.change([h("h1", "Limits"), m("sqrt(x^2+1)")]);
     t.core.commit();
     const act = t.core.log.find((e): e is TraceEvent<"act"> => e.kind === "act");
     expect(act?.payload).toMatchObject({
-      block: { type: "math", text: "sqrt(x^2+1)", latex: "\\sqrt{x^{2} + 1}" },
+      block: { type: "math", text: "sqrt(x^2+1)" },
       summary: "typed “sqrt(x^2+1)”",
     });
-    const view = readTrace(t.core.log.map((e, i) => ({ ...e, seq: i })));
-    expect(buildContextPack(view).text).toContain("sqrt(x^2+1)");
-    expect(buildContextPack(view).text).not.toContain("\\sqrt");
   });
 });
 
@@ -202,18 +191,6 @@ describe("landmarks", () => {
     expect(t.kinds()).toEqual(["big_erase", "self_correction"]);
   });
 
-  it("crops evidence only for sketch blocks", async () => {
-    const t = harness([h("h1", "Graph it"), sketch("s", 6), p("a", LONG)]);
-    t.core.change([h("h1", "Graph it"), sketch("s", 1), p("a", LONG)]);
-    t.core.commit();
-    t.core.change([h("h1", "Graph it"), sketch("s", 1), p("a", "The")]);
-    t.core.commit();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(t.kinds()).toEqual(["big_erase", "big_erase"]);
-    expect(t.crops).toEqual(["s"]);
-    expect(t.core.log.filter((e) => e.kind === "evidence")).toHaveLength(1);
-  });
-
   it("help_ask anchors at the cursor block's section", () => {
     const t = harness([h("h1", "Limits"), p("a", "lim x→0 sin x / x")]);
     t.core.setCursor("a");
@@ -239,7 +216,7 @@ describe("summaries", () => {
   });
 });
 
-describe("loop-3 rules", () => {
+describe("rewrites and ticks", () => {
   it("replacing a clause of a long line is a rewrite", () => {
     const long =
       "/28 leaves 4 host bits so 16 per block. Network is 203.0.113.40 because 45 rounds down to 40.";
@@ -266,26 +243,6 @@ describe("loop-3 rules", () => {
     t.core.commit();
     const act = t.core.log.find((e): e is TraceEvent<"act"> => e.kind === "act");
     expect(act?.payload.summary).toBe("ticked “Practiced”");
-  });
-
-  it("is not stuck while reading the tutor's lesson or talking to the tutor", () => {
-    const t = harness([h("h1", "CIDR"), p("a", "")]);
-    t.core.placedByTutor(["l1"], "Lesson on CIDR");
-    t.core.change([h("h1", "CIDR"), p("a", ""), p("l1", "A /28 block holds 16 addresses.")]);
-    t.core.commit();
-    t.core.setCursor("l1");
-    t.advance(STUCK_MS * 2);
-    t.core.tick();
-    expect(t.kinds()).toEqual(["taught"]);
-    t.core.setCursor("a");
-    t.core.setAside(true);
-    t.advance(STUCK_MS * 2);
-    t.core.tick();
-    expect(t.kinds()).toEqual(["taught"]);
-    t.core.setAside(false);
-    t.advance(STUCK_MS + 1000);
-    t.core.tick();
-    expect(t.kinds()).toEqual(["taught", "stuck"]);
   });
 });
 
@@ -314,125 +271,5 @@ describe("seen live in Obsidian", () => {
     t.core.change([p("a", "the network address")]);
     t.core.commit();
     expect(t.kinds()).toEqual(["first_attempt"]);
-  });
-
-  it("the pack keeps one line per stretch of typing, not one per pause", () => {
-    const parts = ["**Say it:** 172.", "16.", "0.", "1 is class B;", " 192.168.1.1 is class C."];
-    let text = "";
-    const t = harness([h("h1", "Classful"), p("a", "")]);
-    for (const part of parts) {
-      text += part;
-      t.advance(2500);
-      t.core.change([h("h1", "Classful"), p("a", text)]);
-      t.core.commit();
-    }
-    const pack = buildContextPack(readTrace(t.core.log.map((e, i) => ({ ...e, seq: i }))));
-    expect(pack.data.recentActs).toHaveLength(1);
-    expect(pack.data.recentActs[0]?.summary).toBe(
-      "typed “**Say it:** 172.16.0.1 is class B; 192.168.1.1 is class C.”",
-    );
-  });
-});
-
-describe("checks and sketches", () => {
-  it("records a check as a moment, never as mastery", () => {
-    const t = harness([p("a", "")]);
-    t.core.checked({
-      topic: "journalctl",
-      question: "Which command shows only errors for ssh?",
-      picked: "journalctl -u ssh",
-      answer: "journalctl -u ssh --priority=err",
-    });
-    expect(t.landmarks()[0]).toMatchObject({ kind: "checked", blockId: null });
-    expect(t.landmarks()[0]?.label).toContain("wrong");
-  });
-
-  it("keeps a picture of a sketch as it grows, sampled", async () => {
-    const t = harness([sketch("s", 0)]);
-    t.core.change([sketch("s", 3)]);
-    t.core.commit();
-    t.advance(5000);
-    t.core.change([sketch("s", 6)]);
-    t.core.commit();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    const shots = t.core.log.filter((e): e is TraceEvent<"evidence"> => e.kind === "evidence");
-    expect(shots).toHaveLength(1);
-    expect(shots[0]?.payload.landmarkSeq).toBeUndefined();
-  });
-});
-
-describe("tutor-placed blocks", () => {
-  it("are attributed to the tutor and never count as the learner's work", () => {
-    const t = harness([h("h1", "Limits"), p("a", "")]);
-    t.core.placedByTutor(["l1", "l2"], "Lesson on Limits");
-    t.core.change([
-      h("h1", "Limits"),
-      p("a", ""),
-      h("l1", "Lesson: limit laws"),
-      p("l2", "The limit of a sum is the sum of the limits."),
-    ]);
-    t.core.commit();
-    const acts = t.core.log.filter((e): e is TraceEvent<"act"> => e.kind === "act");
-    expect(acts.map((a) => a.payload.who)).toEqual(["tutor", "tutor"]);
-    expect(t.kinds()).toEqual(["taught"]);
-    expect(t.landmarks()[0]).toMatchObject({
-      label: "Lesson on Limits",
-      blockId: "l1",
-      section: "l1",
-    });
-    t.core.change([
-      h("h1", "Limits"),
-      p("a", ""),
-      h("l1", "Lesson: limit laws"),
-      p("l2", "The limit of a sum is the sum."),
-    ]);
-    t.core.commit();
-    expect(
-      t.core.log.filter((e): e is TraceEvent<"act"> => e.kind === "act").at(-1)?.payload.who,
-    ).toBe("learner");
-    t.core.checked({ topic: "Limits", question: "lim_(x->5) …", picked: "5", answer: "2√5" });
-    const pack = buildContextPack(readTrace(t.core.log.map((e, i) => ({ ...e, seq: i }))));
-    expect(pack.text).toContain("[tutor] “Lesson: limit laws”: placed a lesson (2 blocks)");
-    expect(pack.text).toContain("### Checks they took");
-    expect(pack.data.checks[0]?.label).toContain("wrong");
-  });
-});
-
-describe("context pack", () => {
-  it("names places by heading, says cursor parked, and lists the erase thread", () => {
-    const blocks = [h("h1", "Chain rule"), p("a", LONG), h("h2", "Practice"), p("b", "")];
-    const t = harness(blocks);
-    t.core.change([
-      h("h1", "Chain rule"),
-      p("a", "The derivative"),
-      h("h2", "Practice"),
-      p("b", ""),
-    ]);
-    t.core.commit();
-    t.core.setCursor("b");
-    t.advance(STUCK_MS + 1000);
-    t.core.tick();
-    t.core.ask("how do I start?");
-    const view = readTrace(t.core.log.map((e, i) => ({ ...e, seq: i })));
-    const pack = buildContextPack(view, { goal: "Calculus I" });
-    expect(pack.text).toContain("### Sections they worked in (by heading)");
-    expect(pack.text).toContain("“Chain rule”: cut");
-    expect(pack.text).toContain("“Practice”: cursor parked 46s, then asked for help");
-    expect(pack.text).toContain("not rewritten yet");
-    expect(pack.text).toContain("at “Practice”: “how do I start?”");
-    expect(pack.text).not.toContain("patch");
-    expect(pack.data.sections.map((r) => r.name)).toEqual(["“Chain rule”"]);
-    expect(pack.images).toEqual([]);
-  });
-
-  it("calls a deleted heading's section 'since removed'", () => {
-    const t = harness([h("h1", "Scratch"), p("a", "")]);
-    t.core.change([h("h1", "Scratch"), p("a", "some work here")]);
-    t.core.commit();
-    t.core.change([p("a", "some work here")]);
-    t.core.commit();
-    const view = readTrace(t.core.log.map((e, i) => ({ ...e, seq: i })));
-    const pack = buildContextPack(view);
-    expect(pack.data.recentActs[0]?.section).toBe("a section since removed");
   });
 });

@@ -1,9 +1,12 @@
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
-  buildContextPack,
   formatClock,
+  notesAt,
   readTrace,
+  sectionName,
+  storyUntil,
+  stuckSpans,
   type TraceEvent,
   type TraceView,
 } from "@study-trace/core";
@@ -15,7 +18,6 @@ export type Sitting = {
   note: string | null;
   startedAt: number;
   endedAt: number;
-  /** The learner's own edits. */
   edits: number;
   moments: number;
   view: TraceView;
@@ -38,10 +40,10 @@ export async function loadSittings(dir: string): Promise<Sitting[]> {
       const view = readTrace(events);
       return {
         sessionId: file.replace(/\.jsonl$/, ""),
-        note: view.topics[0]?.topic ?? view.topic,
+        note: view.topic,
         startedAt: view.start,
         endedAt: view.end,
-        edits: view.acts.filter((a) => a.who === "learner").length,
+        edits: view.acts.length,
         moments: view.landmarks.filter((l) => l.kind !== "resumed").length,
         view,
       } satisfies Sitting;
@@ -71,9 +73,11 @@ export function moment(sitting: Sitting, at?: string): number {
   return Number.isFinite(iso) ? iso : sitting.endedAt;
 }
 
+const lowerFirst = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);
+
 /**
  * Several sittings at once, oldest first — the arc of someone's studying, not one session.
- * Each: when, how long, which note, the arc, where it was hard, what they asked.
+ * Each: when, how long, which note, the arc, then where it was hard and what they asked, in time order.
  */
 export function recap(sittings: Sitting[], opts: { note?: string; limit?: number } = {}): string {
   const chosen = sittings
@@ -83,20 +87,39 @@ export function recap(sittings: Sitting[], opts: { note?: string; limit?: number
   if (chosen.length === 0) return "No sittings match.";
   return chosen
     .map((s) => {
-      const { data } = buildContextPack(s.view, { topic: s.note });
+      const { view } = s;
+      const blocks = notesAt(view, view.end);
+      const name = (section: string | null) => sectionName(blocks, section);
+      const lastStall = view.landmarks.findLast((l) => l.kind === "stuck" || l.kind === "resumed");
       const when = new Date(s.startedAt).toLocaleString(undefined, {
         month: "short",
         day: "numeric",
         hour: "numeric",
         minute: "2-digit",
       });
+      // What happened, in order: each stall (with how it ended), erase, rewrite and question.
+      const clock = (t: number) => formatClock(t - view.start);
+      const timeline = [
+        ...stuckSpans(view.landmarks).map(({ at, end }) => ({
+          seq: at.seq,
+          line: `- ${clock(at.t)} stuck · ${name(at.section)} — cursor parked ${end ? `${Math.round((end.quietMs ?? 0) / 1000)}s, then ${lowerFirst(end.label.split(" after ")[0] ?? end.label)}` : "to the end"}`,
+        })),
+        ...view.landmarks
+          .filter((l) => l.kind === "big_erase" || l.kind === "self_correction")
+          .map((l) => ({
+            seq: l.seq,
+            line: `- ${clock(l.t)} ${l.kind === "big_erase" ? "erased" : "rewrote"} · ${name(l.section)} — ${lowerFirst(l.label)}`,
+          })),
+        ...view.asks.map((a) => ({
+          seq: a.seq,
+          line: `- ${clock(a.t)} asked · ${name(a.section)} — “${a.text}”`,
+        })),
+      ].sort((a, b) => a.seq - b.seq);
       return [
         `### ${when} · ${formatClock(s.endedAt - s.startedAt)} · ${s.note ?? "?"} (${s.sessionId})`,
-        `arc: ${data.arc} · ${s.edits} edits`,
-        ...data.struggles.map((x) => `- hard: ${x.section} — ${x.detail}`),
-        ...data.asks.map((a) => `- asked at ${a.section}: “${a.text}”`),
-        ...data.checks.map((c) => `- check: ${c.label}`),
-        data.now.stuckNow ? `- ended stuck in ${data.now.section}` : null,
+        `arc: ${storyUntil(view, view.end)} · ${s.edits} edits`,
+        ...timeline.map((x) => x.line),
+        lastStall?.kind === "stuck" ? `- ended stuck in ${name(lastStall.section)}` : null,
       ]
         .filter((line) => line !== null)
         .join("\n");

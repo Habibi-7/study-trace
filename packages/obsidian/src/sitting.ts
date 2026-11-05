@@ -22,7 +22,7 @@ type Located = Block & { from: number; to: number };
 
 /**
  * One note, open and being studied: parses the markdown into blocks on the typing pause,
- * keeps their ids across edits, maps cursor lines and viewports to blocks, and feeds the
+ * keeps their ids across edits, maps cursor lines to blocks, and feeds the
  * shared Recorder. Events go to `.study-trace/<session>.jsonl`.
  */
 export class Sitting {
@@ -51,7 +51,7 @@ export class Sitting {
     });
     this.blocks = this.parse(doc);
     // The note's path is the sitting's "topic": what they had open.
-    this.recorder.start(this.plain(), null, path);
+    this.recorder.start(this.plain(), path);
   }
 
   /** The doc changed; acts commit on the typing pause. */
@@ -60,7 +60,7 @@ export class Sitting {
     this.commitTimer = this.host.setTimeout(() => this.commit(doc()), TYPING_IDLE_MS);
   }
 
-  /** Commit now (before an ask, a pack, or the end). */
+  /** Commit now (before an ask, or the end). */
   commit(doc?: string) {
     this.host.clearTimeout(this.commitTimer);
     this.commitTimer = undefined;
@@ -73,15 +73,6 @@ export class Sitting {
 
   cursorAt(line: number) {
     this.recorder.setCursor(blockAtLine(this.blocks, line));
-  }
-
-  viewing(firstLine: number, lastLine: number) {
-    const shown = this.blocks
-      .map((b, i) => (b.to >= firstLine && b.from <= lastLine ? i : -1))
-      .filter((i) => i >= 0);
-    const first = shown[0];
-    const last = shown.at(-1);
-    this.recorder.setRange(first === undefined || last === undefined ? null : { first, last });
   }
 
   async end(doc?: string) {

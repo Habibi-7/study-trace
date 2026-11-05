@@ -1,7 +1,6 @@
 # @study-trace/core
 
-The editor-agnostic core. A surface feeds the `Recorder` blocks, cursor moves, visible ranges
-and ticks; it emits acts, focus dwells and moments. `readTrace`, `notesAt` and
-`buildContextPack` read a sitting back — the last one as the compact summary an LLM gets.
+The editor-agnostic part. Feed the `Recorder` blocks, cursor moves and ticks; it emits acts and
+moments. `readTrace` + `notesAt` read a sitting back and replay the note to any moment.
 
-No editor, DOM or Node APIs: runs in a plugin, a server, or a test.
+No DOM, no Node APIs, no timers. Runs anywhere.

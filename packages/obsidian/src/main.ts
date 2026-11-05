@@ -1,6 +1,5 @@
 import type { Extension } from "@codemirror/state";
 import { EditorView, type ViewUpdate } from "@codemirror/view";
-import { buildContextPack, readTrace } from "@study-trace/core";
 import { type DataAdapter, editorInfoField, Notice, Plugin } from "obsidian";
 import { type Host, Sitting } from "./sitting";
 
@@ -40,21 +39,6 @@ export default class StudyTrace extends Plugin {
       }),
     );
 
-    this.addCommand({
-      id: "copy-context-pack",
-      name: "Copy what a tutor would see (ContextPack)",
-      callback: async () => {
-        const sitting = this.sitting;
-        if (!sitting) {
-          new Notice("Study Trace: open a note and study for a moment first.");
-          return;
-        }
-        sitting.commit();
-        const pack = buildContextPack(readTrace(sitting.recorder.log), { at: Date.now() });
-        await navigator.clipboard.writeText(pack.text);
-        new Notice("Study Trace: ContextPack copied.");
-      },
-    });
     this.addCommand({
       id: "ask-here",
       name: "Mark a question here (for your tutor)",
@@ -97,13 +81,6 @@ export default class StudyTrace extends Plugin {
       if (update.docChanged) sitting.changed(() => update.view.state.doc.toString());
       if (update.selectionSet || update.docChanged) {
         sitting.cursorAt(update.state.doc.lineAt(update.state.selection.main.head).number - 1);
-      }
-      if (update.viewportChanged || update.geometryChanged) {
-        const { from, to } = update.view.viewport;
-        sitting.viewing(
-          update.state.doc.lineAt(from).number - 1,
-          update.state.doc.lineAt(to).number - 1,
-        );
       }
     });
   }

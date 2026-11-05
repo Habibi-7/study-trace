@@ -1,7 +1,7 @@
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type Block, buildContextPack, Recorder, STUCK_MS } from "@study-trace/core";
+import { type Block, notesAt, Recorder, STUCK_MS, toMarkdown } from "@study-trace/core";
 import { describe, expect, it } from "vitest";
 import { loadSittings, moment, pick, recap } from "./sittings";
 
@@ -22,7 +22,7 @@ async function fixture(): Promise<string> {
   const li = (id: string, text: string): Block => ({ id, type: "bulletListItem", text });
   const notes = (answer: string) => [h("b1", "Classless IPv4 (CIDR)"), li("b2", answer)];
 
-  recorder.start(notes(""), { first: 0, last: 1 }, "CS-410 Midterm Practice.md");
+  recorder.start(notes(""), "CS-410 Midterm Practice.md");
   now += 5000;
   recorder.change(notes("203.0.113.45/28 network is 203.0.113.40 because 45 rounds down to 40."));
   recorder.commit();
@@ -43,7 +43,7 @@ async function fixture(): Promise<string> {
 }
 
 describe("sittings from JSONL", () => {
-  it("loads a sitting, survives a torn last line, and builds the pack an agent gets", async () => {
+  it("loads a sitting, survives a torn last line, and replays the note at a moment", async () => {
     const dir = await fixture();
     const sittings = await loadSittings(dir);
     expect(sittings).toHaveLength(1);
@@ -55,23 +55,20 @@ describe("sittings from JSONL", () => {
     });
     if (!s) return;
 
-    const pack = buildContextPack(s.view, { at: moment(s), topic: s.note });
-    expect(pack.text).toContain("“Classless IPv4 (CIDR)”: cursor parked");
-    expect(pack.text).toContain("then asked for help");
-    expect(pack.text).toContain("“is my network address right?”");
-    expect(pack.text).toContain("rewrote “40 because 45 rounds do…” as “32: blocks start at mul…”");
-
     // "m:ss" into the sitting: before the rewrite, the wrong answer is what's there.
-    const early = buildContextPack(s.view, { at: moment(s, "0:10") });
-    expect(early.text).toContain("203.0.113.40");
-    expect(early.text).not.toContain("rewrote");
+    expect(toMarkdown(notesAt(s.view, moment(s, "0:10")))).toContain("203.0.113.40");
+    expect(toMarkdown(notesAt(s.view, moment(s)))).toContain("203.0.113.32");
   });
 
-  it("recaps sittings oldest-first with where it was hard and what they asked", async () => {
+  it("recaps a sitting's hard moments and questions in time order, with times", async () => {
     const text = recap(await loadSittings(await fixture()), { note: "cs-410" });
     expect(text).toContain("CS-410 Midterm Practice.md (obsidian-test)");
-    expect(text).toContain("- hard: “Classless IPv4 (CIDR)” — cursor parked");
-    expect(text).toContain("- asked at “Classless IPv4 (CIDR)”: “is my network address right?”");
+    const timeline = text.split("\n").filter((line) => line.startsWith("- "));
+    expect(timeline).toEqual([
+      "- 0:52 stuck · “Classless IPv4 (CIDR)” — cursor parked 47s, then asked for help",
+      "- 0:52 asked · “Classless IPv4 (CIDR)” — “is my network address right?”",
+      "- 1:12 rewrote · “Classless IPv4 (CIDR)” — rewrote “40 because 45 rounds do…” as “32: blocks start at mul…”",
+    ]);
   });
 
   it("returns nothing for an empty or missing directory", async () => {

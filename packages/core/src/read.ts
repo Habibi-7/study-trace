@@ -2,8 +2,6 @@ import type {
   ActPayload,
   AskPayload,
   Block,
-  EvidencePayload,
-  FocusPayload,
   LandmarkKind,
   LandmarkPayload,
   Placed,
@@ -11,7 +9,7 @@ import type {
 } from "./types";
 
 /**
- * Read side: what a silent tutor could say at any moment `t` of a sitting.
+ * Read side: a sitting as a tutor would read it back, at any moment `t`.
  * Pure — runs in the editor plugin, in the MCP server, and anywhere a sitting is read.
  */
 
@@ -20,14 +18,11 @@ export type Seq<T> = T & { seq: number; t: number };
 export type TraceView = {
   start: number;
   end: number;
-  /** The topic open at the end; `topics` has every change. */
+  /** The note's path. */
   topic: string | null;
-  topics: { t: number; topic: string | null }[];
   baseline: Placed[];
   acts: Seq<ActPayload>[];
-  focus: Seq<FocusPayload>[];
   landmarks: Seq<LandmarkPayload>[];
-  evidence: Seq<EvidencePayload>[];
   asks: Seq<AskPayload>[];
 };
 
@@ -37,36 +32,25 @@ export function readTrace(events: TraceEvent[]): TraceView {
     start: sorted[0]?.t ?? 0,
     end: sorted.at(-1)?.t ?? 0,
     topic: null,
-    topics: [],
     baseline: [],
     acts: [],
-    focus: [],
     landmarks: [],
-    evidence: [],
     asks: [],
   };
   for (const event of sorted) {
     const at = { seq: event.seq, t: event.t };
     switch (event.kind) {
       case "session":
-        if (event.payload.baseline) view.baseline = event.payload.baseline;
-        if (event.payload.op !== "close") {
+        if (event.payload.op === "open") {
           view.topic = event.payload.topic;
-          view.topics.push({ t: event.t, topic: event.payload.topic });
+          view.baseline = event.payload.baseline ?? [];
         }
         break;
       case "act":
         view.acts.push({ ...event.payload, ...at });
         break;
-      case "focus":
-        view.focus.push({ ...event.payload, ...at });
-        view.end = Math.max(view.end, event.payload.to);
-        break;
       case "landmark":
         view.landmarks.push({ ...event.payload, ...at });
-        break;
-      case "evidence":
-        view.evidence.push({ ...event.payload, ...at });
         break;
       case "ask":
         view.asks.push({ ...event.payload, ...at });
@@ -111,15 +95,6 @@ export function sectionOf(blocks: Block[], blockId: string | null): string | nul
   return null;
 }
 
-/** Every block in a section, in order. */
-export function sectionBlocks(blocks: Block[], section: string | null): Block[] {
-  let current: string | null = null;
-  return blocks.filter((block) => {
-    if (block.type === "heading") current = block.id;
-    return current === section;
-  });
-}
-
 /** How a tutor would say it: “Chain rule”, "the top of the page", or gone. */
 export function sectionName(blocks: Block[], section: string | null): string {
   if (section === null) return "the top of the page";
@@ -137,23 +112,6 @@ export function sectionName(blocks: Block[], section: string | null): string {
   return `“${words || "Untitled heading"}”`;
 }
 
-// --- the moment -------------------------------------------------------------
-
-/** The curriculum topic they had open at `t`. */
-export function topicAt(view: TraceView, t: number): string | null {
-  return view.topics.filter((x) => x.t <= t).at(-1)?.topic ?? null;
-}
-
-/** Where their eyes were at `t`: the dwell covering it, else the last one before. */
-export function lookingAt(view: TraceView, t: number): Seq<FocusPayload> | null {
-  let last: Seq<FocusPayload> | null = null;
-  for (const dwell of view.focus) {
-    if (dwell.from > t) break;
-    last = dwell;
-  }
-  return last;
-}
-
 const BIT: Record<LandmarkKind, string> = {
   first_attempt: "first words",
   stuck: "stuck",
@@ -161,11 +119,9 @@ const BIT: Record<LandmarkKind, string> = {
   big_erase: "erased",
   self_correction: "rewrote",
   help_ask: "asked",
-  taught: "got a lesson",
-  checked: "took a check",
 };
 
-/** Q5 — the arc, run-length collapsed: "first words → stuck → asked → rewrote". */
+/** The arc, run-length collapsed: "first words → stuck → asked → rewrote". */
 export function storyUntil(view: TraceView, t: number): string {
   const bits: string[] = [];
   for (const landmark of view.landmarks) {
@@ -182,7 +138,7 @@ export function storyUntil(view: TraceView, t: number): string {
   return bits.length > 0 ? bits.join(" → ") : "nothing yet";
 }
 
-/** Q3 — each stall and the moment it ended (null while still stuck). */
+/** Each stall and the moment it ended (null while still stuck). */
 export function stuckSpans(
   landmarks: Seq<LandmarkPayload>[],
 ): { at: Seq<LandmarkPayload>; end: Seq<LandmarkPayload> | null }[] {
@@ -208,18 +164,16 @@ export function clip(text: string, n = 48): string {
 const PREFIX: Record<string, string> = {
   bulletListItem: "- ",
   numberedListItem: "1. ",
-  checkListItem: "- [ ] ",
 };
 
-/** Markdown of some blocks — for tutors, agents, and the MCP server. Math stays as the plain source typed. */
-export function toMarkdown(blocks: Block[], cursor: string | null = null): string {
+/** Markdown of some blocks, for agents reading over MCP. */
+export function toMarkdown(blocks: Block[]): string {
   return blocks
     .map((b) => {
-      const here = b.id === cursor ? "   ← cursor" : "";
-      if (b.type === "heading") return `${"#".repeat(b.level ?? 2)} ${b.text}${here}`;
-      if (b.type === "math") return `$$ ${b.text} $$${here}`;
-      if (b.type === "sketch") return `[sketch: ${b.marks ?? 0} marks]${here}`;
-      return `${PREFIX[b.type] ?? ""}${b.text}${here}`;
+      if (b.type === "heading") return `${"#".repeat(b.level ?? 2)} ${b.text}`;
+      if (b.type === "math") return `$$ ${b.text} $$`;
+      if (b.type === "checkListItem") return `- [${b.checked ? "x" : " "}] ${b.text}`;
+      return `${PREFIX[b.type] ?? ""}${b.text}`;
     })
     .join("\n");
 }

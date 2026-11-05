@@ -6,21 +6,19 @@ import type {
   TraceEvent,
   TraceKind,
   TracePayloads,
-  Who,
 } from "./types";
 
 /**
- * The tutor's eyes on the notes: acts on the typing pause, dwells on looking,
- * landmarks when something changes, crops only for sketches. "Where" is the
- * heading a block sits under; "still" is the cursor parked in one block.
+ * The tutor's eyes on the notes: acts on the typing pause, landmarks when something
+ * changes. "Where" is the heading a block sits under; "still" is the cursor parked in
+ * one block.
  *
- * Pure — no DOM, no timers. The editor binding (use-recorder.ts) feeds it
- * changes, cursor moves, scroll ranges and ticks, and calls `commit()` on the pause.
+ * Pure — no DOM, no timers. The editor binding feeds it changes, cursor moves and
+ * ticks, and calls `commit()` on the pause.
  */
 
 /** Acts commit when typing pauses — not per keystroke. */
 export const TYPING_IDLE_MS = 800;
-export const DWELL_MS = 2000;
 /** Cursor parked in one block, no edits, tab visible → stuck. */
 export const STUCK_MS = 45_000;
 /** A big erase: this many chars cut in one pause… */
@@ -28,9 +26,6 @@ export const BIG_ERASE_CHARS = 40;
 /** …or at least this many that were most of the block. */
 export const BIG_ERASE_MIN_CHARS = 12;
 export const BIG_ERASE_FRACTION = 0.5;
-/** Sketches: marks wiped in one pause. */
-export const SKETCH_WIPE_MARKS = 5;
-export const SKETCH_WIPE_FRACTION = 0.35;
 /** Cut-and-retype inside one pause, both at least this long → a rewrite. */
 export const REWRITE_MIN_CHARS = 8;
 /** …or a clause this long replaced in a long block. */
@@ -40,21 +35,13 @@ export const SMALL_CUT_CHARS = 4;
 export const CHANGE_WINDOW_MS = 30_000;
 /** Retyping where they erased, within this window → self-correction. */
 export const CORRECTION_WINDOW_MS = 120_000;
-const EVIDENCE_MAX = 80;
-const EVIDENCE_COOLDOWN_MS = 20_000;
-
-export type Crop = { image: string; w: number; h: number };
 
 export type RecorderDeps = {
   now: () => number;
   /** Persist one event; returns its seq. */
   emit: <K extends TraceKind>(kind: K, payload: TracePayloads[K], t?: number) => number;
   isVisible: () => boolean;
-  /** Picture of a sketch block, or null when it holds no ink. */
-  capture?: (blockId: string) => Promise<Crop | null>;
 };
-
-type Range = { first: number; last: number };
 
 /** Characters cut and typed between two versions of one block's text. */
 export function textDelta(before: string, after: string): { cut: string; typed: string } {
@@ -98,29 +85,16 @@ export function movedBlocks(before: Block[], after: Block[]): Set<string> {
 }
 
 const same = (a: Block, b: Block) =>
-  a.type === b.type &&
-  a.text === b.text &&
-  a.level === b.level &&
-  a.marks === b.marks &&
-  a.checked === b.checked;
+  a.type === b.type && a.text === b.text && a.level === b.level && a.checked === b.checked;
 
 export class Recorder {
-  /** Everything emitted this sitting — the live ContextPack reads from here. */
+  /** Everything emitted this sitting — a live reader reads from here. */
   readonly log: TraceEvent[] = [];
 
   private committed: Block[] = [];
   private latest: Block[] = [];
   private started = false;
   private stopped = false;
-  /** Blocks the tutor is about to place (a lesson) — their first act is not the learner's. */
-  private byTutor = new Set<string>();
-  /** The lesson being placed, announced as one moment once its blocks land. */
-  private lesson: { ids: string[]; label: string } | null = null;
-  private pasted = false;
-  /** Blocks the tutor wrote: a cursor resting there is reading, not stuck. */
-  private tutorBlocks = new Set<string>();
-  /** In a tutor's chat or a side panel: talking to the tutor isn't freezing. */
-  private aside = false;
 
   private firstAttemptDone = false;
   private lastEditAt = 0;
@@ -131,67 +105,22 @@ export class Recorder {
 
   private cursorBlock: string | null = null;
   private parkedSince = 0;
-  private range: Range | null = null;
-  private dwellStart = 0;
-
-  private evidenceCount = 0;
-  private lastCropAt = new Map<string, number>();
 
   constructor(private readonly deps: RecorderDeps) {}
 
-  get cursor(): string | null {
-    return this.cursorBlock;
-  }
-
-  get blocks(): Block[] {
-    return this.committed;
-  }
-
-  start(blocks: Block[], range: Range | null, topic: string | null) {
+  start(blocks: Block[], topic: string | null) {
     if (this.started) return;
     this.started = true;
-    const now = this.deps.now();
     this.committed = this.latest = blocks;
-    this.lastEditAt = this.dwellStart = now;
-    this.range = range;
+    this.lastEditAt = this.deps.now();
     this.emit("session", { op: "open", topic, baseline: placed(blocks) });
   }
 
   stop() {
     if (!this.started || this.stopped) return;
     this.commit();
-    this.closeDwell();
     this.stopped = true;
     this.emit("session", { op: "close", topic: null });
-  }
-
-  /** They opened a curriculum topic (or closed it). */
-  topic(title: string | null) {
-    if (this.live) this.emit("session", { op: "topic", topic: title });
-  }
-
-  /** The tutor is placing these blocks — a lesson they asked for. */
-  placedByTutor(ids: string[], label: string) {
-    for (const id of ids) this.byTutor.add(id);
-    this.lesson = { ids, label };
-  }
-
-  /** They answered a topic check. Observation only — the check itself moves mastery. */
-  checked(check: { topic: string; question: string; picked: string; answer: string }) {
-    if (!this.live) return;
-    if (this.stuckSince !== null) this.resume(null, "Took a check");
-    const { topic, question, picked, answer } = check;
-    const verdict =
-      picked === answer
-        ? `right (“${clip(picked, 40)}”)`
-        : `wrong — picked “${clip(picked, 40)}”, marked answer “${clip(answer, 40)}”`;
-    const label = `Check on ${topic}: ${verdict} · Q: “${clip(question, 140)}”`;
-    this.landmark("checked", label, null, null);
-  }
-
-  /** Text is arriving by paste: the next commit's new words were copied in, not written. */
-  pasting() {
-    this.pasted = true;
   }
 
   /** The notes changed. The binding calls `commit()` after the typing pause. */
@@ -211,34 +140,21 @@ export class Recorder {
     after.forEach((block, i) => {
       const prev = prevById.get(block.id) ?? null;
       if (prev && same(prev, block) && !moved.has(block.id)) return;
-      const who: Who = this.byTutor.delete(block.id) ? "tutor" : "learner";
-      if (who === "tutor") this.tutorBlocks.add(block.id);
-      const act = this.describe(prev, block, who);
+      const act = this.describe(prev, block);
       this.record({ ...act, block: { ...block, after: after[i - 1]?.id ?? null } }, prev, block);
     });
-
-    const lesson = this.lesson;
-    if (lesson?.ids.some((id) => after.some((b) => b.id === id))) {
-      this.lesson = null;
-      const first = lesson.ids[0] ?? null;
-      if (this.stuckSince !== null) this.resume(first, "Asked for a lesson");
-      this.landmark("taught", lesson.label, first, sectionOf(after, first));
-    }
-
-    this.pasted = false;
 
     const kept = new Set(after.map((b) => b.id));
     for (const block of before) {
       if (kept.has(block.id)) continue;
       this.record(
         {
-          op: block.type === "sketch" ? "erase" : "delete",
-          who: "learner",
+          op: "delete",
           blockId: block.id,
           section: sectionOf(before, block.id),
           summary: block.text.trim()
             ? `deleted “${clip(block.text)}”`
-            : `deleted ${block.type === "sketch" ? "a sketch" : `an empty ${block.type}`}`,
+            : `deleted an empty ${block.type}`,
           ...(block.text ? { before: block.text, cut: block.text.length } : {}),
         },
         block,
@@ -250,29 +166,14 @@ export class Recorder {
   /** Cursor moved. Only block changes matter — arrowing inside a block is still "parked". */
   setCursor(blockId: string | null) {
     if (!this.live || blockId === this.cursorBlock) return;
-    this.closeDwell();
     this.cursorBlock = blockId;
-    this.parkedSince = this.dwellStart = this.deps.now();
+    this.parkedSince = this.deps.now();
     if (this.stuckSince !== null && blockId !== null) this.resume(blockId);
-  }
-
-  /** Which blocks are on screen (reading-order indices). */
-  setRange(range: Range | null) {
-    if (
-      !this.live ||
-      (range && range.first === this.range?.first && range.last === this.range?.last)
-    ) {
-      return;
-    }
-    this.closeDwell();
-    this.range = range;
-    this.dwellStart = this.deps.now();
   }
 
   /** Tab came back: time away is neither looking nor stuck. */
   visible() {
     const now = this.deps.now();
-    this.dwellStart = now;
     if (this.stuckSince === null) {
       this.parkedSince = Math.max(this.parkedSince, now);
       this.lastEditAt = Math.max(this.lastEditAt, now);
@@ -281,21 +182,12 @@ export class Recorder {
 
   hidden() {
     this.commit();
-    this.closeDwell();
-  }
-
-  /** They moved into (or out of) the tutor's drawer or the topic panel. */
-  setAside(aside: boolean) {
-    if (aside === this.aside) return;
-    this.aside = aside;
-    // Coming back to the page starts a fresh quiet clock.
-    if (!aside && this.stuckSince === null) this.parkedSince = this.deps.now();
   }
 
   /** Called every few seconds by the binding. */
   tick() {
-    if (!this.live || this.stuckSince !== null || !this.deps.isVisible() || this.aside) return;
-    if (this.cursorBlock === null || this.tutorBlocks.has(this.cursorBlock)) return;
+    if (!this.live || this.stuckSince !== null || !this.deps.isVisible()) return;
+    if (this.cursorBlock === null) return;
     const now = this.deps.now();
     const since = Math.max(this.lastEditAt, this.parkedSince);
     if (now - since < STUCK_MS) return;
@@ -303,30 +195,24 @@ export class Recorder {
     if (!block) return;
     const section = sectionOf(this.committed, block.id);
     this.stuckSince = since;
-    const seq = this.landmark(
+    this.landmark(
       "stuck",
       `Cursor parked ${Math.round((now - since) / 1000)}s, no edits`,
       block.id,
       section,
       { since },
     );
-    if (block.type === "sketch") void this.crop(block.id, seq);
   }
 
-  /** An ask happened at the cursor (else at what's on screen). */
+  /** An ask happened at the cursor. */
   ask(text: string) {
     if (!this.live) return;
     this.commit();
     const blockId = this.committed.some((b) => b.id === this.cursorBlock) ? this.cursorBlock : null;
-    const section = blockId
-      ? sectionOf(this.committed, blockId)
-      : sectionOf(this.committed, this.committed[this.middleOfScreen()]?.id ?? null);
+    const section = sectionOf(this.committed, blockId);
     if (this.stuckSince !== null) this.resume(blockId, "Asked for help");
     this.emit("ask", { text, blockId, section });
-    const seq = this.landmark("help_ask", `Asked: ${clip(text, 60)}`, blockId, section);
-    if (blockId && this.committed.find((b) => b.id === blockId)?.type === "sketch") {
-      void this.crop(blockId, seq);
-    }
+    this.landmark("help_ask", `Asked: ${clip(text, 60)}`, blockId, section);
     // Waiting on an answer is not freezing.
     this.lastEditAt = this.deps.now();
   }
@@ -337,27 +223,14 @@ export class Recorder {
     return this.started && !this.stopped;
   }
 
-  private describe(prev: Block | null, next: Block, who: Who): ActPayload {
-    const base = { who, blockId: next.id, section: sectionOf(this.committed, next.id) };
+  private describe(prev: Block | null, next: Block): ActPayload {
+    const base = { blockId: next.id, section: sectionOf(this.committed, next.id) };
 
     if (prev === null) {
-      const summary =
-        next.type === "sketch"
-          ? "started a sketch"
-          : next.text.trim()
-            ? `${this.pasted ? "pasted" : "wrote"} “${clip(next.text)}”`
-            : next.type === "math"
-              ? "added a math block"
-              : `new ${next.type === "heading" ? "heading" : "line"}`;
+      const summary = next.text.trim()
+        ? `wrote “${clip(next.text)}”`
+        : `new ${next.type === "heading" ? "heading" : "line"}`;
       return { ...base, op: "create", summary, ...(next.text ? { typed: next.text.length } : {}) };
-    }
-
-    if (next.type === "sketch" && prev.type === "sketch" && prev.marks !== next.marks) {
-      const delta = (next.marks ?? 0) - (prev.marks ?? 0);
-      const n = Math.abs(delta);
-      return delta > 0
-        ? { ...base, op: "stroke", summary: `${n} stroke${n > 1 ? "s" : ""} in a sketch` }
-        : { ...base, op: "erase", summary: `erased ${n} mark${n > 1 ? "s" : ""} in a sketch` };
     }
 
     if (prev.checked !== next.checked && prev.text === next.text) {
@@ -389,7 +262,7 @@ export class Recorder {
             ? `changed “${clip(cut, 24)}” → “${clip(typed, 24)}”`
             : cut
               ? `cut “${clip(cut, 32)}”`
-              : `${this.pasted ? "pasted" : "typed"} “${clip(typed, 40)}”`,
+              : `typed “${clip(typed, 40)}”`,
         before: prev.text,
         cut: cut.length,
         typed: typed.length,
@@ -410,7 +283,6 @@ export class Recorder {
 
   private record(act: ActPayload, prev: Block | null, next: Block | null) {
     this.emit("act", act);
-    if (act.who !== "learner") return;
     const now = this.deps.now();
     const { blockId, section } = act;
 
@@ -418,9 +290,8 @@ export class Recorder {
 
     const cut = act.cut ?? 0;
     const typed = act.typed ?? 0;
-    const authoring = typed > 0 || act.op === "stroke";
+    const authoring = typed > 0;
     const share = cut / Math.max(1, prev?.text.length ?? 0);
-    const wiped = (prev?.marks ?? 0) - (next?.marks ?? 0);
     const pending = this.pendingCorrection;
 
     // Replacing a real chunk of what they'd written — most of a short line, or a clause of a long one.
@@ -433,14 +304,7 @@ export class Recorder {
     const bigCut =
       cut >= BIG_ERASE_CHARS || (cut >= BIG_ERASE_MIN_CHARS && share >= BIG_ERASE_FRACTION);
     const deletedBlock =
-      next === null &&
-      prev !== null &&
-      (prev.text.trim().length >= BIG_ERASE_MIN_CHARS || (prev.marks ?? 0) >= 2);
-    const sketchWipe =
-      act.op === "erase" &&
-      next !== null &&
-      (wiped >= SKETCH_WIPE_MARKS ||
-        (wiped >= 2 && wiped / Math.max(1, prev?.marks ?? 0) >= SKETCH_WIPE_FRACTION));
+      next === null && prev !== null && prev.text.trim().length >= BIG_ERASE_MIN_CHARS;
     const changedWord =
       this.lastCut !== null &&
       this.lastCut.blockId === blockId &&
@@ -468,19 +332,15 @@ export class Recorder {
         section,
       );
       this.pendingCorrection = null;
-    } else if (bigCut || deletedBlock || sketchWipe) {
+    } else if (bigCut || deletedBlock) {
       const label = deletedBlock
         ? "Deleted a whole block"
-        : sketchWipe
-          ? `Wiped ${wiped} marks of a sketch`
-          : `Cut ${cut} chars (${Math.round(share * 100)}%)`;
-      const seq = this.landmark("big_erase", label, blockId, section);
+        : `Cut ${cut} chars (${Math.round(share * 100)}%)`;
+      this.landmark("big_erase", label, blockId, section);
       this.pendingCorrection = { blockId, section, t: now };
-      if (next?.type === "sketch") void this.crop(blockId, seq);
     } else if (correctsErase) {
-      const seq = this.landmark("self_correction", "Rewrote where they erased", blockId, section);
+      this.landmark("self_correction", "Rewrote where they erased", blockId, section);
       this.pendingCorrection = null;
-      if (next?.type === "sketch") void this.crop(blockId, seq);
     } else if (changedWord && prev && next) {
       // "class B" cut, then "class A …" typed in its place: a change of mind, not a typo.
       const typedNow = textDelta(prev.text, next.text).typed;
@@ -502,22 +362,15 @@ export class Recorder {
           ? null
           : this.lastCut;
 
-    // A drawing is ink: keep a picture of it as it grows, not only at moments.
-    if (act.op === "stroke" && next?.type === "sketch") void this.crop(blockId);
-
     this.lastEditAt = now;
     if (next) {
       // Typing in a block puts the cursor there even if no selection event arrived.
-      if (this.cursorBlock !== blockId) {
-        this.closeDwell();
-        this.cursorBlock = blockId;
-        this.dwellStart = now;
-      }
+      this.cursorBlock = blockId;
       this.parkedSince = now;
     }
   }
 
-  /** A stall ends with any action: writing, asking, a lesson, a check. */
+  /** A stall ends with any action: writing or asking. */
   private resume(blockId: string | null, how = "Back at it") {
     const quietMs = this.deps.now() - (this.stuckSince ?? 0);
     this.stuckSince = null;
@@ -536,58 +389,8 @@ export class Recorder {
     blockId: string | null,
     section: string | null,
     extra: { since?: number; quietMs?: number } = {},
-  ): number {
-    return this.emit("landmark", { kind, label, blockId, section, ...extra });
-  }
-
-  // --- attention ---------------------------------------------------------------
-
-  private middleOfScreen(): number {
-    return this.range ? Math.floor((this.range.first + this.range.last) / 2) : -1;
-  }
-
-  private closeDwell() {
-    const now = this.deps.now();
-    const from = this.dwellStart;
-    this.dwellStart = now;
-    if (now - from < DWELL_MS || (!this.range && !this.cursorBlock)) return;
-    const anchor = this.cursorBlock ?? this.committed[this.middleOfScreen()]?.id ?? null;
-    this.emit(
-      "focus",
-      {
-        from,
-        to: now,
-        blockId: this.cursorBlock,
-        section: sectionOf(this.committed, anchor),
-        first: this.range?.first ?? -1,
-        last: this.range?.last ?? -1,
-      },
-      from,
-    );
-  }
-
-  // --- evidence ----------------------------------------------------------------
-
-  /** A picture of a sketch block, tied to a moment when there is one. */
-  private async crop(blockId: string, landmarkSeq?: number) {
-    const capture = this.deps.capture;
-    if (!capture || this.evidenceCount >= EVIDENCE_MAX) return;
-    const now = this.deps.now();
-    // Moments always get their picture; drawing progress is sampled.
-    const sampled = landmarkSeq === undefined;
-    if (sampled && now - (this.lastCropAt.get(blockId) ?? -Infinity) < EVIDENCE_COOLDOWN_MS) return;
-    this.evidenceCount++;
-    if (sampled) this.lastCropAt.set(blockId, now);
-    const shot = await capture(blockId).catch(() => null);
-    if (!shot) {
-      this.evidenceCount--;
-      return;
-    }
-    this.emit("evidence", {
-      blockId,
-      ...shot,
-      ...(landmarkSeq !== undefined ? { landmarkSeq } : {}),
-    });
+  ) {
+    this.emit("landmark", { kind, label, blockId, section, ...extra });
   }
 
   private emit<K extends TraceKind>(kind: K, payload: TracePayloads[K], at?: number): number {

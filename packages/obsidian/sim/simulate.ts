@@ -14,7 +14,6 @@ import { STUCK_MS } from "@study-trace/core";
 import { type Host, Sitting } from "../src/sitting";
 
 const TICK_MS = 5000;
-const VIEW_LINES = 40;
 
 /** Timers on a clock we move by hand; the plugin's 5 s tick fires as time passes. */
 class Clock {
@@ -68,7 +67,6 @@ export class Student {
   private state: EditorState;
   private sitting!: Sitting;
   private random: () => number;
-  private viewTop = 0;
 
   constructor(
     private readonly vault: string,
@@ -100,7 +98,6 @@ export class Student {
       this.state.doc.toString(),
       `obsidian-sim-${this.clock.t}`,
     );
-    this.scrollTo(0);
     return this;
   }
 
@@ -108,18 +105,11 @@ export class Student {
     return this.state.doc.lineAt(this.state.selection.main.head).number - 1;
   }
 
-  private scrollTo(line: number) {
-    if (line >= this.viewTop && line < this.viewTop + VIEW_LINES - 5) return;
-    this.viewTop = Math.max(0, line - 10);
-    this.sitting.viewing(this.viewTop, this.viewTop + VIEW_LINES);
-  }
-
   private apply(spec: TransactionSpec) {
     const tr = this.state.update(spec);
     this.state = tr.state;
     if (tr.docChanged) this.sitting.changed(() => this.state.doc.toString());
     this.sitting.cursorAt(this.line);
-    this.scrollTo(this.line);
   }
 
   /** Let time pass (reading, thinking, staring) — ticks fire as they would. */
