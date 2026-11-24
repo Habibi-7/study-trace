@@ -30,7 +30,12 @@ export default class StudyTrace extends Plugin {
 
   override async onload() {
     this.registerEditorExtension(this.watcher());
-    this.registerInterval(window.setInterval(() => this.sitting?.recorder.tick(), TICK_MS));
+    this.registerInterval(
+      window.setInterval(() => {
+        if (this.sitting?.idle()) void this.endSitting();
+        else this.sitting?.recorder.tick();
+      }, TICK_MS),
+    );
     this.registerDomEvent(window, "blur", () => this.sitting?.recorder.hidden());
     this.registerDomEvent(window, "focus", () => this.sitting?.recorder.visible());
     this.registerEvent(
@@ -67,8 +72,16 @@ export default class StudyTrace extends Plugin {
     return EditorView.updateListener.of((update: ViewUpdate) => {
       const file = update.state.field(editorInfoField, false)?.file;
       if (file?.extension !== "md") return;
+      // Obsidian reloading the note from disk (a sync, a script, git) isn't the learner
+      // writing: end the sitting and start fresh from what's on disk now.
+      const reloaded = update.transactions.some((tr) => tr.isUserEvent("set"));
+      if (reloaded && this.sitting?.path === file.path) {
+        const sitting = this.sitting;
+        this.sitting = null;
+        void sitting.end(update.startState.doc.toString());
+      }
       if (this.sitting?.path !== file.path) {
-        if (!update.view.hasFocus) return;
+        if (!update.view.hasFocus && !reloaded) return;
         void this.endSitting();
         this.sitting = new Sitting(
           obsidianHost(this.app.vault.adapter),

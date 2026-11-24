@@ -4,6 +4,8 @@ import { blockAtLine, parseMarkdown, reconcile } from "./markdown";
 /** Where sittings live, inside the vault but out of sight. One JSONL file per sitting. */
 export const TRACE_DIR = ".study-trace";
 const FLUSH_MS = 2000;
+/** No edits or questions for this long and the sitting is over; the next keystroke starts a new one. */
+export const IDLE_END_MS = 10 * 60_000;
 
 /**
  * What a sitting needs from its host. Obsidian provides the real ones (main.ts); a test or
@@ -36,6 +38,7 @@ export class Sitting {
   /** Opening a note and leaving isn't a sitting: write nothing until something happens. */
   private happened = false;
   private commitTimer: number | undefined;
+  private lastActive: number;
 
   constructor(
     private readonly host: Host,
@@ -44,6 +47,7 @@ export class Sitting {
     sessionId = `obsidian-${crypto.randomUUID()}`,
   ) {
     this.sessionId = sessionId;
+    this.lastActive = host.now();
     this.recorder = new Recorder({
       now: host.now,
       emit: (kind, payload, t) => this.emit(kind, payload, t),
@@ -71,6 +75,11 @@ export class Sitting {
     this.recorder.commit();
   }
 
+  /** Gone quiet long enough that this sitting is over. */
+  idle(): boolean {
+    return this.host.now() - this.lastActive >= IDLE_END_MS;
+  }
+
   cursorAt(line: number) {
     this.recorder.setCursor(blockAtLine(this.blocks, line));
   }
@@ -94,6 +103,7 @@ export class Sitting {
     const seq = this.seq++;
     this.lines.push(JSON.stringify({ seq, t, kind, payload }));
     if (kind === "act" || kind === "landmark" || kind === "ask") this.happened = true;
+    if (kind === "act" || kind === "ask") this.lastActive = t;
     if (this.flushTimer === undefined) {
       this.flushTimer = this.host.setTimeout(() => void this.flush(), FLUSH_MS);
     }

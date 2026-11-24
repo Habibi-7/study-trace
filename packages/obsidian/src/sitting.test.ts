@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type Host, Sitting } from "./sitting";
+import { type Host, IDLE_END_MS, Sitting } from "./sitting";
 
 function host() {
   const files = new Map<string, string>();
@@ -34,5 +34,18 @@ describe("Sitting", () => {
     expect(kinds[0]).toBe("session");
     expect(kinds).toContain("act");
     expect(kinds.at(-1)).toBe("session");
+  });
+
+  // Seen in a real vault: a note left open for a week became one 10,181-minute sitting.
+  it("is over after ten quiet minutes, and an edit keeps it going", () => {
+    const { h, advance } = host();
+    const s = new Sitting(h, "CS-410.md", "## Subnet mask\n- **Say it:**", "obsidian-test");
+    advance(IDLE_END_MS - 1000);
+    expect(s.idle()).toBe(false);
+    s.commit("## Subnet mask\n- **Say it:** a mask");
+    advance(IDLE_END_MS - 1000);
+    expect(s.idle()).toBe(false);
+    advance(1000);
+    expect(s.idle()).toBe(true);
   });
 });
