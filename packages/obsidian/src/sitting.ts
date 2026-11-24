@@ -9,7 +9,7 @@ export const IDLE_END_MS = 10 * 60_000;
 
 /**
  * What a sitting needs from its host. Obsidian provides the real ones (main.ts); a test or
- * the study simulator provides a virtual clock and a file writer. No Obsidian API in here.
+ * provides a fake clock and an in-memory writer. No Obsidian API in here.
  */
 export type Host = {
   now: () => number;

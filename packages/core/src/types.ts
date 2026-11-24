@@ -42,7 +42,8 @@ export type ActPayload = {
   op: ActOp;
   blockId: string;
   section: string | null;
-  summary: string;
+  /** Only when the change isn't in the text: "ticked …", "made … a heading". */
+  summary?: string;
   /** The block after the pause; absent when it was deleted. */
   block?: Placed;
   /** Text before the pause, when it changed. */

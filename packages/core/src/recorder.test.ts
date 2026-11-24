@@ -97,8 +97,9 @@ describe("math", () => {
     t.core.commit();
     const act = t.core.log.find((e): e is TraceEvent<"act"> => e.kind === "act");
     expect(act?.payload).toMatchObject({
+      op: "edit",
+      before: "",
       block: { type: "math", text: "sqrt(x^2+1)" },
-      summary: "typed “sqrt(x^2+1)”",
     });
   });
 });
@@ -205,16 +206,17 @@ describe("timeline", () => {
 });
 
 describe("summaries", () => {
-  it("say 'tidied spacing' for whitespace and name a type change", () => {
+  it("name a change that isn't in the text, and say spacing plainly in the timeline", () => {
     const t = harness([p("a", " RAID levels")]);
     t.core.change([{ id: "a", type: "heading", level: 2, text: "RAID levels" }]);
     t.core.commit();
     t.core.change([{ id: "a", type: "heading", level: 2, text: "RAID levels " }]);
     t.core.commit();
     const acts = t.core.log.filter((e): e is TraceEvent<"act"> => e.kind === "act");
-    expect(acts.map((a) => a.payload.summary)).toEqual([
-      "made “RAID levels” a heading",
-      "tidied spacing",
+    expect(acts.map((a) => a.payload.summary)).toEqual(["made “RAID levels” a heading", undefined]);
+    expect(timeline(t.view())).toEqual([
+      "[0:00] “RAID levels” · made “RAID levels” a heading",
+      "[0:00] changed spacing",
     ]);
   });
 });

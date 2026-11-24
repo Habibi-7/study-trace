@@ -1,8 +1,8 @@
 import type { ActPayload, AskPayload, Block, Placed, QuietPayload, TraceEvent } from "./types";
 
 /**
- * Read side: a sitting as a tutor would read it back, at any moment `t`.
- * Pure — runs in the editor plugin, in the MCP server, and anywhere a sitting is read.
+ * Read side: a sitting back from its events — the note at any moment `t`, and the whole
+ * sitting as plain frames. Pure; runs wherever a sitting is read.
  */
 
 export type Seq<T> = T & { seq: number; t: number };
@@ -236,7 +236,7 @@ export function timeline(view: TraceView): string[] {
           ? `deleted the line ${quote(e.before ?? "")}`
           : e.op === "move"
             ? `moved ${quote(text ?? "")}`
-            : e.summary;
+            : (e.summary ?? "changed a line");
       frames.push({ seq: e.seq, t: e.t, section: e.section, text: what });
     } else if (e.kind === "quiet") {
       flush();

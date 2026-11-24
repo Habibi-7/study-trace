@@ -6,8 +6,8 @@ import { listLine, loadSittings, moment, pick, recap, type Sitting, sittingText 
 
 /**
  * Study Trace over MCP: any agent (Claude, Cursor, …) can read how a learner has been
- * studying — what a tutor beside them would have noticed. Reads the JSONL sittings the
- * Obsidian plugin writes to `<vault>/.study-trace`. Local, read-only.
+ * studying, as plain frames. Reads the JSONL sittings the Obsidian plugin writes to
+ * `<vault>/.study-trace`. Local, read-only.
  *
  *   study-trace-mcp /path/to/vault/.study-trace     (or STUDY_TRACE_DIR)
  */

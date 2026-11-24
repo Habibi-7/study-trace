@@ -59,7 +59,7 @@ const same = (a: Block, b: Block) =>
   a.type === b.type && a.text === b.text && a.level === b.level && a.checked === b.checked;
 
 export class Recorder {
-  /** Everything emitted this sitting — a live reader reads from here. */
+  /** Everything emitted this sitting. */
   readonly log: TraceEvent[] = [];
 
   private committed: Block[] = [];
@@ -131,9 +131,6 @@ export class Recorder {
           op: "delete",
           blockId: block.id,
           section: sectionOf(before, block.id),
-          summary: block.text.trim()
-            ? `deleted “${clip(block.text)}”`
-            : `deleted an empty ${block.type}`,
           ...(block.text ? { before: block.text, cut: block.text.length } : {}),
         },
         null,
@@ -172,67 +169,39 @@ export class Recorder {
     this.emit("ask", { text, blockId, section: sectionOf(this.committed, blockId) });
   }
 
-  // --- acts --------------------------------------------------------------------
-
   private get live() {
     return this.started && !this.stopped;
   }
 
+  /** What kind of change; text changes carry the text before (the block carries after). */
   private describe(prev: Block | null, next: Block): ActPayload {
     const base = { blockId: next.id, section: sectionOf(this.committed, next.id) };
-
     if (prev === null) {
-      const summary = next.text.trim()
-        ? `wrote “${clip(next.text)}”`
-        : `new ${next.type === "heading" ? "heading" : "line"}`;
-      return { ...base, op: "create", summary, ...(next.text ? { typed: next.text.length } : {}) };
+      return { ...base, op: "create", ...(next.text ? { typed: next.text.length } : {}) };
     }
-
     if (prev.checked !== next.checked && prev.text === next.text) {
       return {
         ...base,
         op: "edit",
-        summary: `${next.checked ? "ticked" : "unticked"} “${clip(next.text, 40)}”`,
+        summary: `${next.checked ? "ticked" : "unticked"} “${clip(next.text, 80)}”`,
       };
     }
-
     const retyped = prev.type !== next.type || prev.level !== next.level;
     if (prev.text !== next.text && !(retyped && prev.text.trim() === next.text.trim())) {
       const { cut, typed } = textDelta(prev.text, next.text);
-      if (!cut.trim() && !typed.trim()) {
-        return {
-          ...base,
-          op: "edit",
-          summary: "tidied spacing",
-          before: prev.text,
-          cut: cut.length,
-          typed: typed.length,
-        };
-      }
-      return {
-        ...base,
-        op: "edit",
-        summary:
-          cut && typed
-            ? `changed “${clip(cut, 24)}” → “${clip(typed, 24)}”`
-            : cut
-              ? `cut “${clip(cut, 32)}”`
-              : `typed “${clip(typed, 40)}”`,
-        before: prev.text,
-        cut: cut.length,
-        typed: typed.length,
-      };
+      return { ...base, op: "edit", before: prev.text, cut: cut.length, typed: typed.length };
     }
-
     if (retyped) {
       return {
         ...base,
         op: "edit",
-        summary: `made “${clip(next.text || next.type, 32)}” a ${next.type}`,
+        summary: `made “${clip(next.text || next.type, 80)}” a ${next.type}`,
       };
     }
-    return { ...base, op: "move", summary: `moved “${clip(next.text || next.type, 32)}”` };
+    return { ...base, op: "move" };
   }
+
+  // --- frames ------------------------------------------------------------------
 
   private record(act: ActPayload, next: Block | null) {
     this.emit("act", act);
