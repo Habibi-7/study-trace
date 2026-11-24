@@ -17,7 +17,7 @@ frame by frame. Everything stays in your vault.
 ```bash
 pnpm install && pnpm build
 mkdir -p "<vault>/.obsidian/plugins/study-trace"
-cp packages/obsidian/dist/main.js packages/obsidian/manifest.json "<vault>/.obsidian/plugins/study-trace/"
+cp packages/obsidian/dist/main.js manifest.json "<vault>/.obsidian/plugins/study-trace/"
 ```
 
 Turn on **Study Trace** in Settings → Community plugins. Then give your agent the trace:

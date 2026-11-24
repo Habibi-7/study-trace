@@ -1,0 +1,9 @@
+{
+  "id": "study-trace",
+  "name": "Study Trace",
+  "version": "0.1.0",
+  "minAppVersion": "1.5.0",
+  "description": "Records how you work through a note — what you write and change, where you pause, what you ask — so any AI agent can read it back over MCP. Local only.",
+  "author": "Habib Habibi",
+  "isDesktopOnly": true
+}

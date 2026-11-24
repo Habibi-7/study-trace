@@ -6,7 +6,7 @@ Obsidian plugin records how someone studies a note → JSONL in `<vault>/.study-
 
 ## Done means proven on real data
 Tests passing is not done. The code is the docs: no docs/ folder; comments say why. Build, install into a real vault, do the thing in real Obsidian, read the JSONL and the MCP output.
-- Build + install: `pnpm build && cp packages/obsidian/dist/main.js packages/obsidian/manifest.json "<vault>/.obsidian/plugins/study-trace/"`
+- Build + install: `pnpm build && cp packages/obsidian/dist/main.js manifest.json "<vault>/.obsidian/plugins/study-trace/"`
 - Drive Obsidian: `obsidian vault="<name>" plugin:reload id=study-trace | open path=… | eval code=… | dev:cdp method=Input.insertText params='{"text":"…"}' | dev:errors`. The CLI hangs after printing; wrap it: `perl -e 'alarm 20; exec @ARGV' obsidian …`.
 
 ## Traps (each one bit us)
