@@ -33,7 +33,6 @@ export default class StudyTrace extends Plugin {
     this.registerInterval(
       window.setInterval(() => {
         if (this.sitting?.idle()) void this.endSitting();
-        else this.sitting?.recorder.tick();
       }, TICK_MS),
     );
     this.registerDomEvent(window, "blur", () => this.sitting?.recorder.hidden());
@@ -92,6 +91,15 @@ export default class StudyTrace extends Plugin {
       const sitting = this.sitting;
       if (!sitting) return;
       if (update.docChanged) sitting.changed(() => update.view.state.doc.toString());
+      if (update.viewportChanged || update.geometryChanged) {
+        const ranges = update.view.visibleRanges;
+        const first = ranges[0];
+        const last = ranges.at(-1);
+        if (first && last) {
+          const doc = update.state.doc;
+          sitting.viewing(doc.lineAt(first.from).number - 1, doc.lineAt(last.to).number - 1);
+        }
+      }
       if (update.selectionSet || update.docChanged) {
         sitting.cursorAt(update.state.doc.lineAt(update.state.selection.main.head).number - 1);
       }

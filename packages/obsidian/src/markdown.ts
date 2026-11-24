@@ -96,25 +96,15 @@ export function parseMarkdown(markdown: string): Parsed[] {
       continue;
     }
 
-    // A paragraph runs until a blank line or the start of another block.
-    let to = i;
-    while (to + 1 < lines.length) {
-      const next = lines[to + 1] ?? "";
-      if (
-        next.trim() === "" ||
-        HEADING.test(next) ||
-        BULLET.test(next) ||
-        NUMBERED.test(next) ||
-        FENCE.test(next) ||
-        next.trim().startsWith("$$")
-      ) {
-        break;
-      }
-      to++;
-    }
-    const text = lines.slice(i, to + 1).join("\n");
-    out.push({ type: text.trimStart().startsWith(">") ? "quote" : "paragraph", text, from, to });
-    i = to + 1;
+    // One line, one block: a student writes and fixes notes line by line, and a trace of
+    // whole paragraphs would repeat every line each time one of them changes.
+    out.push({
+      type: line.trimStart().startsWith(">") ? "quote" : "paragraph",
+      text: line,
+      from,
+      to: i,
+    });
+    i++;
   }
   return out;
 }

@@ -15,14 +15,15 @@ flowchart LR
 ```
 
 **Capture.** The plugin listens to the editor. On every typing pause it parses the note into
-blocks (headings, lines, list items, code, math) and hands them to the `Recorder`.
+blocks (one per line; code and `$$` math blocks whole) and hands them to the `Recorder`, along
+with keystrokes, cursor moves, the visible lines and window focus.
 
-**Record.** The `Recorder` diffs blocks against the last pause, writes one `act` per changed
-block, and fires moments. It's pure: no DOM, no timers, no files. Easy to test, easy to reuse
-for another editor.
+**Record.** The `Recorder` diffs blocks against the last pause and writes one `act` per changed
+block, and a `quiet` frame for every stretch of 10 s+ without typing. No labels, no thresholds
+on what "stuck" means: that's the reader's call. It's pure: no DOM, no timers, no files.
 
-**Read.** The MCP server loads the JSONL, sorts by `seq`, and can replay the note to any
-moment with `notesAt`.
+**Read.** `timeline()` renders a sitting as plain frames; `notesAt` replays the note to any
+moment. The MCP server serves both.
 
 ## Block ids
 
@@ -41,6 +42,7 @@ live in the plugin.
 
 ## Next
 
-1. Use it on real sittings, tune `STUCK_MS` and erase sizes.
+1. Use it on real sittings; see if agents read the frames well. Detectors (fast, deterministic)
+   can come back later, on the read side, without changing what's recorded.
 2. A tutor pane inside Obsidian.
 3. Other editors (VS Code, Notion) feeding the same `Recorder`.

@@ -1,8 +1,8 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { formatClock, notesAt, sectionName, toMarkdown } from "@study-trace/core";
+import { notesAt, toMarkdown } from "@study-trace/core";
 import { z } from "zod";
-import { loadSittings, moment, pick, recap, type Sitting } from "./sittings";
+import { listLine, loadSittings, moment, pick, recap, type Sitting, sittingText } from "./sittings";
 
 /**
  * Study Trace over MCP: any agent (Claude, Cursor, …) can read how a learner has been
@@ -24,11 +24,14 @@ const server = new McpServer({ name: "study-trace", version: "0.1.0" });
 
 const text = (body: string) => ({ content: [{ type: "text" as const, text: body }] });
 const which = {
-  session: z.string().optional().describe("Sitting id from list_sittings. Default: the latest."),
+  session: z
+    .string()
+    .optional()
+    .describe("Sitting id (from list_sittings or a timeline header). Default: the latest."),
   note: z
     .string()
     .optional()
-    .describe("Part of a note's path, to pick its latest sitting instead."),
+    .describe("Part of a note's path: picks that note's latest sitting. Prefer `session`."),
 };
 
 async function find(session?: string, note?: string): Promise<Sitting | string> {
@@ -45,55 +48,45 @@ server.registerTool(
   {
     title: "List study sittings",
     description:
-      "Recent study sittings (one per note opened and worked in): when, how long, which note, how many edits and notable moments. Start here.",
+      "Recent study sittings (one per note worked in; a sitting ends after 10 quiet minutes or when they switch notes): id, when, how long, which note, edits, questions marked, longest pause. Newest first.",
     inputSchema: { limit: z.number().int().min(1).max(50).optional() },
   },
   async ({ limit }) => {
     const sittings = (await loadSittings(dir)).slice(0, limit ?? 10);
     if (sittings.length === 0) return text(`No sittings yet in ${dir}.`);
-    return text(
-      sittings
-        .map(
-          (s) =>
-            `- ${s.sessionId} · ${new Date(s.startedAt).toLocaleString()} · ${formatClock(s.endedAt - s.startedAt)} · ${s.note ?? "?"} · ${s.edits} edits · ${s.moments} moments`,
-        )
-        .join("\n"),
-    );
+    return text(sittings.map((s) => `- ${listLine(s)}`).join("\n"));
+  },
+);
+
+const FRAMES =
+  "Each line is a frame stamped m:ss into the sitting: what they typed or changed (block text before → after), " +
+  "stretches of 10s+ without typing (where the cursor sat, what was on screen, time away from Obsidian), " +
+  "and questions they marked. Facts only, no labels: read the pauses, erasures and rewrites yourself.";
+
+server.registerTool(
+  "get_sitting",
+  {
+    title: "One study sitting, frame by frame",
+    description: `Everything that happened in one sitting, in order. ${FRAMES}`,
+    inputSchema: which,
+  },
+  async ({ session, note }) => {
+    const sitting = await find(session, note);
+    return text(typeof sitting === "string" ? sitting : sittingText(sitting));
   },
 );
 
 server.registerTool(
   "get_recap",
   {
-    title: "Recap of recent sittings",
-    description:
-      "The arc across the learner's recent sittings in one read (oldest first): per sitting, when and how long, which note, where it was hard, what they asked, whether they ended stuck. Best first call for 'how has my studying gone?'.",
+    title: "Recent sittings, frame by frame",
+    description: `The learner's recent sittings, oldest first, each as a full timeline. ${FRAMES} Best first call for "how has my studying gone?".`,
     inputSchema: {
       note: z.string().optional().describe("Only sittings on notes whose path contains this."),
-      limit: z.number().int().min(1).max(20).optional(),
+      limit: z.number().int().min(1).max(10).optional().describe("How many sittings (default 3)."),
     },
   },
   async ({ note, limit }) => text(recap(await loadSittings(dir), { note, limit })),
-);
-
-server.registerTool(
-  "get_moments",
-  {
-    title: "Notable moments in a sitting",
-    description:
-      "Stalls, big erases, self-corrections, first words, marked questions — each with its time and the section (heading) it happened in.",
-    inputSchema: which,
-  },
-  async ({ session, note }) => {
-    const sitting = await find(session, note);
-    if (typeof sitting === "string") return text(sitting);
-    const { view } = sitting;
-    const lines = view.landmarks.map((l) => {
-      const blocks = notesAt(view, l.t);
-      return `- ${formatClock(l.t - view.start)} · ${l.kind} · ${sectionName(blocks, l.section)} · ${l.label}`;
-    });
-    return text(lines.join("\n") || "No notable moments yet.");
-  },
 );
 
 server.registerTool(
@@ -101,8 +94,14 @@ server.registerTool(
   {
     title: "The note as it stood at a moment",
     description:
-      "The learner's note, as markdown, exactly as it was at a given moment of the sitting (default: the end).",
-    inputSchema: { ...which, at: z.string().optional() },
+      "The learner's note, as markdown, exactly as it was at a moment of a sitting (default: the end). Use it to see the whole page around a frame.",
+    inputSchema: {
+      ...which,
+      at: z
+        .string()
+        .optional()
+        .describe('"m:ss" into the sitting (as in the timeline), or an ISO time.'),
+    },
   },
   async ({ session, note, at }) => {
     const sitting = await find(session, note);

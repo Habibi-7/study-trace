@@ -20,11 +20,11 @@ Claude Desktop (`claude_desktop_config.json`):
 }
 ```
 
-| Tool            | Args                     | Gives you                                   |
-| --------------- | ------------------------ | ------------------------------------------- |
-| `get_recap`     | `note?` `limit?`         | recent sittings, moments in time order      |
-| `list_sittings` | `limit?`                 | when, how long, which note, counts          |
-| `get_moments`   | `session?` `note?`       | every moment with time and section          |
-| `get_notes_at`  | `session?` `note?` `at?` | the note as it was at that moment           |
+| Tool            | Args                     | Gives you                                                  |
+| --------------- | ------------------------ | ---------------------------------------------------------- |
+| `get_recap`     | `note?` `limit?`         | the last few sittings as frames, oldest first              |
+| `get_sitting`   | `session?` `note?`       | one sitting as frames                                      |
+| `list_sittings` | `limit?`                 | id, when, how long, which note, edits, questions, longest pause |
+| `get_notes_at`  | `session?` `note?` `at?` | the whole note as it stood at that moment                  |
 
 `at` = `"m:ss"` into the sitting, ISO time, or epoch ms.

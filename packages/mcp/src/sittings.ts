@@ -2,13 +2,10 @@ import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   formatClock,
-  notesAt,
   readTrace,
-  sectionName,
-  storyUntil,
-  stuckSpans,
   type TraceEvent,
   type TraceView,
+  timeline,
 } from "@study-trace/core";
 
 /** One recorded sitting: a JSONL file of trace events, as the Obsidian plugin writes them. */
@@ -19,7 +16,9 @@ export type Sitting = {
   startedAt: number;
   endedAt: number;
   edits: number;
-  moments: number;
+  questions: number;
+  /** The longest stretch without typing, in ms. */
+  longestQuiet: number;
   view: TraceView;
 };
 
@@ -44,13 +43,14 @@ export async function loadSittings(dir: string): Promise<Sitting[]> {
         startedAt: view.start,
         endedAt: view.end,
         edits: view.acts.length,
-        moments: view.landmarks.filter((l) => l.kind !== "resumed").length,
+        questions: view.asks.length,
+        longestQuiet: Math.max(0, ...view.quiets.map((q) => q.ms)),
         view,
       } satisfies Sitting;
     }),
   );
   return sittings
-    .filter((s) => s.view.acts.length > 0 || s.view.landmarks.length > 0)
+    .filter((s) => s.view.acts.length > 0 || s.view.asks.length > 0)
     .sort((a, b) => b.endedAt - a.endedAt);
 }
 
@@ -73,56 +73,43 @@ export function moment(sitting: Sitting, at?: string): number {
   return Number.isFinite(iso) ? iso : sitting.endedAt;
 }
 
-const lowerFirst = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);
+const when = (t: number) =>
+  new Date(t).toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
 
-/**
- * Several sittings at once, oldest first — the arc of someone's studying, not one session.
- * Each: when, how long, which note, the arc, then where it was hard and what they asked, in time order.
- */
+/** One line per sitting, for picking one. */
+export function listLine(s: Sitting): string {
+  return [
+    s.sessionId,
+    when(s.startedAt),
+    formatClock(s.endedAt - s.startedAt),
+    s.note ?? "?",
+    `${s.edits} edits`,
+    `${s.questions} questions`,
+    `longest pause ${Math.round(s.longestQuiet / 1000)}s`,
+  ].join(" · ");
+}
+
+/** A whole sitting as frames, with a header that says which one it is. */
+export function sittingText(s: Sitting): string {
+  return [
+    `## ${s.note ?? "?"} · ${when(s.startedAt)} · ${formatClock(s.endedAt - s.startedAt)} · session ${s.sessionId}`,
+    `[0:00] opened the note (get_notes_at at "0:00" shows it as it was)`,
+    ...timeline(s.view),
+    `[${formatClock(s.endedAt - s.startedAt)}] end`,
+  ].join("\n");
+}
+
+/** Several sittings, oldest first — the arc of someone's studying, not one session. */
 export function recap(sittings: Sitting[], opts: { note?: string; limit?: number } = {}): string {
   const chosen = sittings
     .filter((s) => !opts.note || s.note?.toLowerCase().includes(opts.note.toLowerCase()))
-    .slice(0, opts.limit ?? 5)
+    .slice(0, opts.limit ?? 3)
     .reverse();
   if (chosen.length === 0) return "No sittings match.";
-  return chosen
-    .map((s) => {
-      const { view } = s;
-      const blocks = notesAt(view, view.end);
-      const name = (section: string | null) => sectionName(blocks, section);
-      const lastStall = view.landmarks.findLast((l) => l.kind === "stuck" || l.kind === "resumed");
-      const when = new Date(s.startedAt).toLocaleString(undefined, {
-        month: "short",
-        day: "numeric",
-        hour: "numeric",
-        minute: "2-digit",
-      });
-      // What happened, in order: each stall (with how it ended), erase, rewrite and question.
-      const clock = (t: number) => formatClock(t - view.start);
-      const timeline = [
-        ...stuckSpans(view.landmarks).map(({ at, end }) => ({
-          seq: at.seq,
-          line: `- ${clock(at.t)} stuck · ${name(at.section)} — cursor parked ${end ? `${Math.round((end.quietMs ?? 0) / 1000)}s, then ${lowerFirst(end.label.split(" after ")[0] ?? end.label)}` : "to the end"}`,
-        })),
-        ...view.landmarks
-          .filter((l) => l.kind === "big_erase" || l.kind === "self_correction")
-          .map((l) => ({
-            seq: l.seq,
-            line: `- ${clock(l.t)} ${l.kind === "big_erase" ? "erased" : "rewrote"} · ${name(l.section)} — ${lowerFirst(l.label)}`,
-          })),
-        ...view.asks.map((a) => ({
-          seq: a.seq,
-          line: `- ${clock(a.t)} asked · ${name(a.section)} — “${a.text}”`,
-        })),
-      ].sort((a, b) => a.seq - b.seq);
-      return [
-        `### ${when} · ${formatClock(s.endedAt - s.startedAt)} · ${s.note ?? "?"} (${s.sessionId})`,
-        `arc: ${storyUntil(view, view.end)} · ${s.edits} edits`,
-        ...timeline.map((x) => x.line),
-        lastStall?.kind === "stuck" ? `- ended stuck in ${name(lastStall.section)}` : null,
-      ]
-        .filter((line) => line !== null)
-        .join("\n");
-    })
-    .join("\n\n");
+  return chosen.map(sittingText).join("\n\n");
 }

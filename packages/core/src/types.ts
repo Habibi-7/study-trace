@@ -1,14 +1,15 @@
 /**
- * Study trace: what a silent tutor sitting beside the notes remembers.
+ * Study trace: what happened in a note, frame by frame — facts, not verdicts.
  *
- *   what they produced, in order  → acts
- *   where it was hard             → stuck / big_erase / self_correction landmarks
- *   what they wanted to ask       → asks
+ *   what they wrote and changed, in order  → act (the block before and after)
+ *   when they stopped typing, and where     → quiet (cursor, screen, time away)
+ *   what they wanted to ask                 → ask
  *
+ * Whoever reads it (an LLM, a tutor) decides what it means.
  * "Where" is a section: the heading a block sits under (`null` = above the first heading).
  */
 
-export const TRACE_KINDS = ["session", "act", "landmark", "ask"] as const;
+export const TRACE_KINDS = ["session", "act", "quiet", "ask"] as const;
 export type TraceKind = (typeof TRACE_KINDS)[number];
 
 /** A note block as the trace sees it: plain text, editor-agnostic. */
@@ -51,23 +52,17 @@ export type ActPayload = {
   typed?: number;
 };
 
-export type LandmarkKind =
-  | "first_attempt"
-  | "stuck"
-  | "resumed"
-  | "big_erase"
-  | "self_correction"
-  | "help_ask";
-
-export type LandmarkPayload = {
-  kind: LandmarkKind;
-  label: string;
-  blockId: string | null;
-  section: string | null;
-  /** stuck: quiet since. */
-  since?: number;
-  /** resumed: how long the stall lasted. */
-  quietMs?: number;
+/** A stretch of at least `QUIET_MS` with no typing, written when typing resumes (or the sitting ends). */
+export type QuietPayload = {
+  /** When the stretch began; the event's `t` is when it ended. */
+  from: number;
+  ms: number;
+  /** Where the cursor sat, in order, with how long (window-away time excluded). */
+  spots: { blockId: string | null; section: string | null; ms: number }[];
+  /** Time the Obsidian window wasn't focused. */
+  awayMs: number;
+  /** The blocks at the top and bottom of the screen when it ended. */
+  view: { first: string; last: string } | null;
 };
 
 export type AskPayload = {
@@ -80,7 +75,7 @@ export type AskPayload = {
 export type TracePayloads = {
   session: SessionPayload;
   act: ActPayload;
-  landmark: LandmarkPayload;
+  quiet: QuietPayload;
   ask: AskPayload;
 };
 

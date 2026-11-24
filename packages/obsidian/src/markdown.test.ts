@@ -29,6 +29,12 @@ ip route get 8.8.8.8
 `;
 
 describe("parseMarkdown", () => {
+  // Seen live: "Work:" and the lines under it were one block, so every frame repeated all of them.
+  it("makes each line of a paragraph its own block", () => {
+    const work = parseMarkdown("Work:\n/20 = 255.255.248.0\n45 sits in 40–47");
+    expect(work.map((b) => b.text)).toEqual(["Work:", "/20 = 255.255.248.0", "45 sits in 40–47"]);
+  });
+
   const blocks = parseMarkdown(NOTE);
 
   it("reads headings, tasks, lists, math and code as blocks, skipping frontmatter", () => {

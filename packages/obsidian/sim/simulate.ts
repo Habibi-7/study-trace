@@ -10,7 +10,6 @@
 import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { EditorSelection, EditorState, type TransactionSpec } from "@codemirror/state";
-import { STUCK_MS } from "@study-trace/core";
 import { type Host, Sitting } from "../src/sitting";
 
 const TICK_MS = 5000;
@@ -110,11 +109,12 @@ export class Student {
     this.state = tr.state;
     if (tr.docChanged) this.sitting.changed(() => this.state.doc.toString());
     this.sitting.cursorAt(this.line);
+    this.sitting.viewing(Math.max(0, this.line - 10), this.line + 30);
   }
 
   /** Let time pass (reading, thinking, staring) — ticks fire as they would. */
   wait(seconds: number) {
-    this.clock.advance(seconds * 1000, () => this.sitting.recorder.tick());
+    this.clock.advance(seconds * 1000, () => {});
     return this;
   }
 
@@ -190,7 +190,7 @@ export class Student {
   }
 
   /** Sit with the cursor still: reading, thinking — or stuck. */
-  stall(seconds = STUCK_MS / 1000 + 15) {
+  stall(seconds = 60) {
     return this.wait(seconds);
   }
 

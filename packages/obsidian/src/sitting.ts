@@ -60,6 +60,7 @@ export class Sitting {
 
   /** The doc changed; acts commit on the typing pause. */
   changed(doc: () => string) {
+    this.recorder.typing();
     this.host.clearTimeout(this.commitTimer);
     this.commitTimer = this.host.setTimeout(() => this.commit(doc()), TYPING_IDLE_MS);
   }
@@ -73,6 +74,14 @@ export class Sitting {
       this.recorder.change(this.plain());
     }
     this.recorder.commit();
+  }
+
+  /** The editor's visible lines, 0-based. */
+  viewing(firstLine: number, lastLine: number) {
+    const shown = this.blocks.filter((b) => b.to >= firstLine && b.from <= lastLine);
+    const first = shown[0];
+    const last = shown.at(-1);
+    this.recorder.setRange(first && last ? { first: first.id, last: last.id } : null);
   }
 
   /** Gone quiet long enough that this sitting is over. */
@@ -102,7 +111,7 @@ export class Sitting {
   private emit(kind: TraceEvent["kind"], payload: unknown, t = this.host.now()): number {
     const seq = this.seq++;
     this.lines.push(JSON.stringify({ seq, t, kind, payload }));
-    if (kind === "act" || kind === "landmark" || kind === "ask") this.happened = true;
+    if (kind === "act" || kind === "ask") this.happened = true;
     if (kind === "act" || kind === "ask") this.lastActive = t;
     if (this.flushTimer === undefined) {
       this.flushTimer = this.host.setTimeout(() => void this.flush(), FLUSH_MS);
